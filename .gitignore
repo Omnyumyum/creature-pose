@@ -1,0 +1,12 @@
+# 받은 데이터 · 그린 그림 · 가중치는 올리지 않는다
+data/
+out/
+work/
+venv/
+**/__pycache__/
+*.pth
+*.onnx
+*.ndjson
+.env
+**/.env
+*.key
