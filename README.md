@@ -27,3 +27,4 @@
 | 날짜 | 무엇 | 어디 |
 |---|---|---|
 | 2026-11-17 | 2번(규칙 정답 품질 재기) 클라우드 세션 시작 | 세션이 실수로 hankan-experiments 저장소에 붙어 그쪽 브랜치 `work/quad-pseudo-1117` 의 `creature-pose/` 폴더에서 진행 중. 끝나면 이 저장소로 옮긴다 |
+| 2026-11-17 | 1번 시험 세트 초안: 네 발 30장(실제 아이 그림 6 · Amateur Drawings 등 17 · 팀 그림 1 · 합성 6)을 모으고 규칙으로 관절 초안. 규칙이 「관절 찾음」이라 한 것은 19장(합성 6장은 모두, 실제 그림 24장 중 13장) | `tools/build_testset.py` · `tools/make_labeler.py` → `data/testset/label_quadruped.html` 에서 사람이 점을 고쳐 정답 확정(아직 안 함) |
