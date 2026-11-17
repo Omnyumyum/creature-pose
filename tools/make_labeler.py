@@ -11,6 +11,9 @@ data/testset/quadruped/auto.json(규칙이 단 초안)을 읽어 한 장짜리 H
   - 고친 것은 브라우저에 바로 저장되고, 「내보내기」를 누르면 labels_quadruped.json 을 받는다.
     받은 파일을 data/testset/quadruped/labels.json 으로 옮기면 그것이 정답이다.
 
+  - 「이 각도로 초안 다시 달기」와 파일 자동 저장은 tools/label_server.py 로 열었을 때만 된다(http://127.0.0.1:8765/).
+    파일을 그냥 열면 점 고치기 · 회전 · 내보내기만 된다. 두 방식은 브라우저 저장소가 달라서, 옮길 때는 내보내기 → 가져오기.
+
     python tools/make_labeler.py   → data/testset/label_quadruped.html
 """
 
@@ -60,8 +63,11 @@ PAGE = r"""<!doctype html>
       <b id="angle">0°</b> <button id="rr5">↻ 5°</button> <button id="rr90" title="오른쪽으로 90도">↻ 90°</button></span>
     <label><input type="checkbox" id="names" checked> 이름 보기</label>
     <button id="reset">초안으로 되돌리기</button>
+    <button id="redraft" title="지금 세운 각도로 그림을 돌려 규칙을 다시 돌립니다">이 각도로 초안 다시 달기</button>
     <button id="done">이 그림 끝 → 다음</button>
     <button id="export">내보내기</button>
+    <button id="import">가져오기</button><input type="file" id="file" accept=".json" style="display:none">
+    <span id="status" style="color:#b35c00"></span>
     <span id="count"></span>
   </div>
   <div id="bar"><span>없는 부위(누르면 통째로 안 보임, 다시 누르면 되살림):</span>
@@ -78,10 +84,19 @@ const DATA = __DATA__, JOINTS = __JOINTS__, KEY = "creature-pose-quadruped-label
 let labels = {};
 try { labels = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
 const names = Object.keys(DATA).sort();
-let cur = 0;
+let cur = Math.max(0, names.indexOf(decodeURIComponent(location.hash.slice(1))));   // 주소 끝에 #그림이름 을 붙이면 그 그림부터
 const $ = id => document.getElementById(id), NS = "http://www.w3.org/2000/svg";
 const color = n => n.endsWith("_b") ? "#d23" : n.endsWith("_f") ? "#25d" : n.startsWith("tail") ? "#93c" : n === "head" ? "#0a5c2a" : "#1a8f3c";
-function save() { try { localStorage.setItem(KEY, JSON.stringify(labels)); } catch (e) {} }
+const SERVED = location.protocol.startsWith("http");   // label_server.py 로 열었나
+let timer = 0;
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(labels)); } catch (e) {}
+  if (!SERVED) return;
+  clearTimeout(timer);   // 끌 때마다 보내지 않게 조금 모아서 파일에 저장
+  timer = setTimeout(() => fetch("labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(labels) })
+    .then(r => r.json()).then(() => say("파일에 저장됨")).catch(() => say("파일 저장 실패 (서버가 꺼졌나요)")), 500);
+}
+function say(t) { document.getElementById("status").textContent = t; }
 function draft(n, name, j) {
   const a = DATA[n], p = a.joints[name];
   if (p) return [p[0], p[1], 1];
@@ -187,6 +202,30 @@ $("rl90").onclick = () => turn(-90); $("rr90").onclick = () => turn(90);
 $("rl5").onclick = () => turn(-5); $("rr5").onclick = () => turn(5);
 $("reset").onclick = () => { delete labels[names[cur]]; save(); show(); };
 $("done").onclick = () => { rec(names[cur]).done = true; save(); if (cur < names.length - 1) cur++; show(); };
+$("redraft").onclick = () => {
+  if (!SERVED) { say("이 단추는 python tools/label_server.py 로 띄운 주소(http://127.0.0.1:8765/)에서만 됩니다"); return; }
+  const n = names[cur], r = rec(n);
+  say("규칙을 다시 돌리는 중…"); $("redraft").disabled = true;
+  fetch("redraft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n, rotate: r.rotate || 0 }) })
+    .then(x => x.json()).then(x => {
+      $("redraft").disabled = false;
+      if (!x.ok) { say("초안 못 닮: " + x.message); return; }
+      for (const [name] of JOINTS) if (x.joints[name]) r.joints[name] = [x.joints[name][0], x.joints[name][1], 1];
+      delete r.joints.head; rec(n);   // 머리는 새 목 · 어깨에서 다시 어림
+      r.done = false; save(); show();
+      say(x.found ? "초안을 다시 달았습니다" : "규칙이 다리를 못 찾아 기본 뼈대를 놓았습니다");
+    }).catch(() => { $("redraft").disabled = false; say("서버에 닿지 않습니다"); });
+};
+$("import").onclick = () => $("file").click();
+$("file").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const got = JSON.parse(t); let k = 0;
+    for (const n of names) if (got[n] && got[n].joints) { labels[n] = { use: got[n].use !== false, facing: got[n].facing || "", done: !!got[n].done, rotate: got[n].rotate || 0, joints: got[n].joints }; k++; }
+    save(); show(); say(k + "장 가져옴");
+  }).catch(() => say("파일을 읽지 못했습니다"));
+  e.target.value = "";
+};
 $("export").onclick = () => {
   const out = {};
   for (const n of names) if (labels[n] && labels[n].done) out[n] = Object.assign({ width: DATA[n].width, height: DATA[n].height, source: DATA[n].source }, labels[n]);
@@ -194,7 +233,11 @@ $("export").onclick = () => {
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
   a.download = "labels_quadruped.json"; a.click();
 };
-show();
+if (SERVED) {
+  // 파일(labels.json)에 저장된 것이 있으면 그것이 기준
+  fetch("labels").then(r => r.json()).then(got => { if (Object.keys(got).length) { labels = got; try { localStorage.setItem(KEY, JSON.stringify(labels)); } catch (e) {} } show(); })
+    .catch(() => show());
+} else show();
 </script></body></html>
 """
 
