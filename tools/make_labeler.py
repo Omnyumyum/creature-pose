@@ -3,6 +3,7 @@
 data/testset/quadruped/auto.json(규칙이 단 초안)을 읽어 한 장짜리 HTML 을 만든다. 브라우저에서 그냥 연다(서버 필요 없음).
   - 점을 끌어 옮긴다. 점을 오른쪽 클릭하면 「안 보임」(그림에 없는 부위, 예: 꼬리 없음)으로 바뀐다.
   - 그림마다 「시험에 씀 / 뺌」(네 발로 선 그림이 아니면 뺌)과 머리 쪽(왼쪽 · 오른쪽)을 고른다.
+  - 그림마다 동물 종류를 고른다. 서비스 카드의 네 발 예시(강아지 · 고양이 · 공룡)가 맨 앞. 종류별로 따로 채점하려는 것.
   - 돌아간 그림은 회전 단추(90도 · 5도)로 바로 세운다. 점은 그림과 함께 돈다.
     정답 좌표는 늘 원본 PNG 기준으로 저장하고, 바로 세우는 각도(rotate, 시계 방향 도)를 따로 적는다.
   - 머리(head) 관절은 서비스 정의에 없는 것을 이 실험에서 더했다(기린처럼 목이 긴 그림). 초안은 어깨 → 목 방향으로 조금 더 간 자리.
@@ -26,6 +27,9 @@ SET = ROOT / "data/testset/quadruped"
 # 관절 이름 · 화면 이름은 drawtale-ai runtime/ai_server/forms/quadruped.json (dev 4c2147f) 그대로.
 # 부모는 화면에 선을 긋는 용도라 다리를 몸통 쪽에 이었다(원본은 다리 위 관절의 부모가 root).
 # head 는 서비스 정의에 없고 이 실험에서 더한 관절이다 (2026-11-17, 목이 긴 동물)
+# 동물 종류: 앞 셋은 서비스 형태 카드(4족형)의 예시 동물 (forms/quadruped.json examples)
+KINDS = ["강아지", "고양이", "공룡", "말", "소", "돼지", "양", "기린", "코끼리", "호랑이 · 사자", "악어 · 도마뱀", "거북", "쥐 · 토끼", "상상 동물", "그 밖"]
+
 JOINTS = [("hip", None, "엉덩이"), ("torso", "hip", "어깨"), ("neck", "torso", "목"), ("head", "neck", "머리"),
           ("right_hip_b", "hip", "뒷다리 1 위"), ("right_knee_b", "right_hip_b", "뒷다리 1 무릎"), ("right_foot_b", "right_knee_b", "뒷다리 1 발"),
           ("left_hip_b", "hip", "뒷다리 2 위"), ("left_knee_b", "left_hip_b", "뒷다리 2 무릎"), ("left_foot_b", "left_knee_b", "뒷다리 2 발"),
@@ -59,6 +63,7 @@ PAGE = r"""<!doctype html>
     <b id="name"></b>
     <label><input type="checkbox" id="use"> 시험에 씀(네 발로 선 그림)</label>
     <label>머리 쪽 <select id="facing"><option value="">모름</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select></label>
+    <label>동물 <select id="kind"><option value="">안 고름</option>__KINDS__</select></label>
     <span>회전 <button id="rl90" title="왼쪽으로 90도">↺ 90°</button> <button id="rl5">↺ 5°</button>
       <b id="angle">0°</b> <button id="rr5">↻ 5°</button> <button id="rr90" title="오른쪽으로 90도">↻ 90°</button></span>
     <label><input type="checkbox" id="names" checked> 이름 보기</label>
@@ -123,7 +128,7 @@ function drawList() {
   $("list").innerHTML = "";
   names.forEach((n, i) => {
     const d = document.createElement("div"), r = labels[n];
-    d.textContent = n.replace(".png", "") + (DATA[n].found ? "" : " (초안 없음)");
+    d.textContent = n.replace(".png", "") + (r && r.kind ? " · " + r.kind : "") + (DATA[n].found ? "" : " (초안 없음)");
     d.className = (i === cur ? "on " : "") + (r && r.done ? "done " : "") + (r && !r.use ? "skip" : "");
     d.onclick = () => { cur = i; show(); };
     $("list").appendChild(d);
@@ -185,12 +190,13 @@ function show() {
     svg.appendChild(c); svg.appendChild(t);
   }
   $("name").textContent = `${n}  (${a.source}: ${a.note})`;
-  $("use").checked = r.use; $("facing").value = r.facing;
+  $("use").checked = r.use; $("facing").value = r.facing; $("kind").value = r.kind || "";
   groupButtons();
   drawList();
 }
 $("use").onchange = e => { rec(names[cur]).use = e.target.checked; save(); drawList(); };
 $("facing").onchange = e => { rec(names[cur]).facing = e.target.value; save(); };
+$("kind").onchange = e => { rec(names[cur]).kind = e.target.value; save(); drawList(); };
 $("names").onchange = show;
 document.querySelectorAll("button.grp").forEach(b => b.onclick = () => {
   const r = rec(names[cur]), ks = GROUPS[b.dataset.g], off = ks.every(k => !r.joints[k][2]);
@@ -221,7 +227,7 @@ $("file").onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   f.text().then(t => {
     const got = JSON.parse(t); let k = 0;
-    for (const n of names) if (got[n] && got[n].joints) { labels[n] = { use: got[n].use !== false, facing: got[n].facing || "", done: !!got[n].done, rotate: got[n].rotate || 0, joints: got[n].joints }; k++; }
+    for (const n of names) if (got[n] && got[n].joints) { labels[n] = { use: got[n].use !== false, facing: got[n].facing || "", kind: got[n].kind || "", done: !!got[n].done, rotate: got[n].rotate || 0, joints: got[n].joints }; k++; }
     save(); show(); say(k + "장 가져옴");
   }).catch(() => say("파일을 읽지 못했습니다"));
   e.target.value = "";
@@ -244,7 +250,7 @@ if (SERVED) {
 
 def main() -> None:
     auto = json.load(open(SET / "auto.json", encoding="utf-8"))
-    page = PAGE.replace("__DATA__", json.dumps(auto, ensure_ascii=False)).replace(
+    page = PAGE.replace("__KINDS__", "".join(f"<option>{k}</option>" for k in KINDS)).replace("__DATA__", json.dumps(auto, ensure_ascii=False)).replace(
         "__JOINTS__", json.dumps([list(j) for j in JOINTS], ensure_ascii=False))
     out = SET.parent / "label_quadruped.html"
     out.write_text(page, encoding="utf-8")
