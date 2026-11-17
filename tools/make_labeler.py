@@ -3,6 +3,8 @@
 data/testset/quadruped/auto.json(규칙이 단 초안)을 읽어 한 장짜리 HTML 을 만든다. 브라우저에서 그냥 연다(서버 필요 없음).
   - 점을 끌어 옮긴다. 점을 오른쪽 클릭하면 「안 보임」(그림에 없는 부위, 예: 꼬리 없음)으로 바뀐다.
   - 그림마다 「시험에 씀 / 뺌」(네 발로 선 그림이 아니면 뺌)과 머리 쪽(왼쪽 · 오른쪽)을 고른다.
+  - 돌아간 그림은 회전 단추(90도 · 5도)로 바로 세운다. 점은 그림과 함께 돈다.
+    정답 좌표는 늘 원본 PNG 기준으로 저장하고, 바로 세우는 각도(rotate, 시계 방향 도)를 따로 적는다.
   - 고친 것은 브라우저에 바로 저장되고, 「내보내기」를 누르면 labels_quadruped.json 을 받는다.
     받은 파일을 data/testset/quadruped/labels.json 으로 옮기면 그것이 정답이다.
 
@@ -49,13 +51,15 @@ PAGE = r"""<!doctype html>
     <b id="name"></b>
     <label><input type="checkbox" id="use"> 시험에 씀(네 발로 선 그림)</label>
     <label>머리 쪽 <select id="facing"><option value="">모름</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select></label>
+    <span>회전 <button id="rl90" title="왼쪽으로 90도">↺ 90°</button> <button id="rl5">↺ 5°</button>
+      <b id="angle">0°</b> <button id="rr5">↻ 5°</button> <button id="rr90" title="오른쪽으로 90도">↻ 90°</button></span>
     <label><input type="checkbox" id="names" checked> 이름 보기</label>
     <button id="reset">초안으로 되돌리기</button>
     <button id="done">이 그림 끝 → 다음</button>
     <button id="export">내보내기</button>
     <span id="count"></span>
   </div>
-  <div id="bar"><span id="help">점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
+  <div id="bar"><span id="help">돌아간 그림은 먼저 회전 단추로 바로 세웁니다. 점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
   <div id="stage"><svg id="svg"></svg></div>
 </div>
 <script>
@@ -74,7 +78,7 @@ function rec(n) {
       const p = a.joints[name];
       j[name] = p ? [p[0], p[1], 1] : [a.width / 2, a.height / 2, 1];
     }
-    labels[n] = { use: true, facing: "", done: false, joints: j };
+    labels[n] = { use: true, facing: "", done: false, rotate: 0, joints: j };
   }
   return labels[n];
 }
@@ -92,14 +96,21 @@ function drawList() {
 }
 function show() {
   const n = names[cur], a = DATA[n], r = rec(n), svg = $("svg");
-  const s = Math.min(1, 900 / Math.max(a.width, a.height)) * 1;
-  svg.setAttribute("width", a.width * s); svg.setAttribute("height", a.height * s);
-  svg.setAttribute("viewBox", `0 0 ${a.width} ${a.height}`);
+  // 그림을 rotate 도(시계 방향) 돌려 보여 준다. 점은 원본 좌표로 두고 화면 좌표로만 바꿔 그린다
+  const deg = r.rotate || 0, th = deg * Math.PI / 180, co = Math.cos(th), si = Math.sin(th);
+  const W = Math.abs(a.width * co) + Math.abs(a.height * si), H = Math.abs(a.width * si) + Math.abs(a.height * co);
+  const fwd = p => { const dx = p[0] - a.width / 2, dy = p[1] - a.height / 2; return [W / 2 + dx * co - dy * si, H / 2 + dx * si + dy * co]; };
+  const inv = (X, Y) => { const dx = X - W / 2, dy = Y - H / 2; return [a.width / 2 + dx * co + dy * si, a.height / 2 - dx * si + dy * co]; };
+  const s = Math.min(1, 900 / Math.max(W, H));
+  svg.setAttribute("width", W * s); svg.setAttribute("height", H * s);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = "";
   const img = document.createElementNS(NS, "image");
   img.setAttribute("href", "quadruped/" + n); img.setAttribute("width", a.width); img.setAttribute("height", a.height);
+  img.setAttribute("transform", `translate(${W / 2} ${H / 2}) rotate(${deg}) translate(${-a.width / 2} ${-a.height / 2})`);
   svg.appendChild(img);
-  const lines = {}, R = Math.max(a.width, a.height) / 110;
+  $("angle").textContent = deg + "°";
+  const lines = {}, R = Math.max(W, H) / 110;
   for (const [name, parent] of JOINTS) if (parent) {
     const l = document.createElementNS(NS, "line");
     l.setAttribute("stroke", color(name)); l.setAttribute("stroke-width", R / 2.2);
@@ -107,8 +118,8 @@ function show() {
   }
   function place() {
     for (const [name, parent] of JOINTS) if (parent) {
-      const p = r.joints[name], q = r.joints[parent], l = lines[name];
-      l.setAttribute("x1", q[0]); l.setAttribute("y1", q[1]); l.setAttribute("x2", p[0]); l.setAttribute("y2", p[1]);
+      const p = r.joints[name], q = r.joints[parent], l = lines[name], P = fwd(p), Q = fwd(q);
+      l.setAttribute("x1", Q[0]); l.setAttribute("y1", Q[1]); l.setAttribute("x2", P[0]); l.setAttribute("y2", P[1]);
       l.setAttribute("opacity", p[2] && q[2] ? .9 : .15);
     }
   }
@@ -116,7 +127,7 @@ function show() {
   for (const [name, , label] of JOINTS) {
     const p = r.joints[name], c = document.createElementNS(NS, "circle"), t = document.createElementNS(NS, "text");
     c.setAttribute("r", R); c.setAttribute("fill", color(name));
-    const put = () => { c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); t.setAttribute("x", p[0] + R * 1.3); t.setAttribute("y", p[1] + 4);
+    const put = () => { const P = fwd(p); c.setAttribute("cx", P[0]); c.setAttribute("cy", P[1]); t.setAttribute("x", P[0] + R * 1.3); t.setAttribute("y", P[1] + 4);
                         c.setAttribute("class", p[2] ? "" : "gone"); };
     t.textContent = label; t.style.display = $("names").checked ? "" : "none"; t.style.fontSize = Math.max(11, R * 1.6) + "px";
     put();
@@ -125,8 +136,9 @@ function show() {
       c.setPointerCapture(e.pointerId);
       const move = ev => {
         const b = svg.getBoundingClientRect();
-        p[0] = Math.round(Math.max(0, Math.min(a.width, (ev.clientX - b.left) / b.width * a.width)));
-        p[1] = Math.round(Math.max(0, Math.min(a.height, (ev.clientY - b.top) / b.height * a.height)));
+        const o = inv((ev.clientX - b.left) / b.width * W, (ev.clientY - b.top) / b.height * H);
+        p[0] = Math.round(Math.max(0, Math.min(a.width, o[0])));
+        p[1] = Math.round(Math.max(0, Math.min(a.height, o[1])));
         put(); place();
       };
       const up = () => { c.removeEventListener("pointermove", move); c.removeEventListener("pointerup", up); save(); };
@@ -142,6 +154,9 @@ function show() {
 $("use").onchange = e => { rec(names[cur]).use = e.target.checked; save(); drawList(); };
 $("facing").onchange = e => { rec(names[cur]).facing = e.target.value; save(); };
 $("names").onchange = show;
+const turn = d => { const r = rec(names[cur]); r.rotate = (((r.rotate || 0) + d) % 360 + 360) % 360; save(); show(); };
+$("rl90").onclick = () => turn(-90); $("rr90").onclick = () => turn(90);
+$("rl5").onclick = () => turn(-5); $("rr5").onclick = () => turn(5);
 $("reset").onclick = () => { delete labels[names[cur]]; save(); show(); };
 $("done").onclick = () => { rec(names[cur]).done = true; save(); if (cur < names.length - 1) cur++; show(); };
 $("export").onclick = () => {
