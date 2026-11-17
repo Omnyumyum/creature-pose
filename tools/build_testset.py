@@ -45,9 +45,11 @@ def prepare(src: str, dst: Path) -> None:
     im.save(dst)
 
 
-def analyze(path: Path) -> dict | None:
+def analyze(path: Path, facing: str | None = None) -> dict | None:
+    """facing: 머리 쪽 left · right 를 알려 주면 규칙이 그쪽을 머리로 본다. 없으면 규칙이 추측한다"""
     b = uuid.uuid4().hex
-    body = (f'--{b}\r\nContent-Disposition: form-data; name="form"\r\n\r\nquadruped\r\n'
+    side = f'--{b}\r\nContent-Disposition: form-data; name="facing"\r\n\r\n{facing}\r\n' if facing in ("left", "right") else ""
+    body = (f'--{b}\r\nContent-Disposition: form-data; name="form"\r\n\r\nquadruped\r\n{side}'
             f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
             f"Content-Type: image/png\r\n\r\n").encode() + path.read_bytes() + f"\r\n--{b}--\r\n".encode()
     try:

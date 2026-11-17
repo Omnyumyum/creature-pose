@@ -13,6 +13,8 @@ data/testset/quadruped/auto.json(규칙이 단 초안)을 읽어 한 장짜리 H
   - 고친 것은 브라우저에 바로 저장되고, 「내보내기」를 누르면 labels_quadruped.json 을 받는다.
     받은 파일을 data/testset/quadruped/labels.json 으로 옮기면 그것이 정답이다.
 
+  - 「머리 쪽」을 고르고 초안을 다시 달면 규칙이 그쪽을 머리로 본다(머리 · 앞다리가 그쪽, 꼬리 · 뒷다리가 반대쪽).
+    규칙이 머리 쪽을 거꾸로 짐작한 그림을 바로잡는 용도. 「모름」이면 규칙이 짐작하고, 짐작한 쪽을 칸에 채워 준다.
   - 「이 각도로 초안 다시 달기」와 파일 자동 저장은 tools/label_server.py 로 열었을 때만 된다(http://127.0.0.1:8765/).
     파일을 그냥 열면 점 고치기 · 회전 · 내보내기만 된다. 두 방식은 브라우저 저장소가 달라서, 옮길 때는 내보내기 → 가져오기.
 
@@ -70,7 +72,7 @@ PAGE = r"""<!doctype html>
       <b id="angle">0°</b> <button id="rr5">↻ 5°</button> <button id="rr90" title="오른쪽으로 90도">↻ 90°</button></span>
     <label><input type="checkbox" id="names" checked> 이름 보기</label>
     <button id="reset">초안으로 되돌리기</button>
-    <button id="redraft" title="지금 세운 각도로 그림을 돌려 규칙을 다시 돌립니다">이 각도로 초안 다시 달기</button>
+    <button id="redraft" title="지금 세운 각도와 고른 머리 쪽으로 규칙을 다시 돌립니다">이 각도 · 머리 쪽으로 초안 다시 달기</button>
     <button id="done">이 그림 끝 → 다음</button>
     <button id="export">내보내기</button>
     <button id="import">가져오기</button><input type="file" id="file" accept=".json" style="display:none">
@@ -83,7 +85,7 @@ PAGE = r"""<!doctype html>
     <button class="grp" data-g="_b1">뒷다리 1</button><button class="grp" data-g="_b2">뒷다리 2</button>
     <button class="grp" data-g="head">머리</button>
     <span id="help2" style="color:#555;font-size:13px">다리를 하나만 그렸으면 「1」에 놓고 「2」를 없음으로. 두 개면 몸 가운데 쪽이 1, 바깥쪽이 2.</span></div>
-  <div id="bar"><span id="help">돌아간 그림은 먼저 회전 단추로 바로 세웁니다. 점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목 · 머리, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
+  <div id="bar"><span id="help">돌아간 그림은 먼저 회전 단추로 바로 세우고, 머리가 반대쪽에 놓였으면 「머리 쪽」을 고른 뒤 「초안 다시 달기」를 누릅니다. 점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목 · 머리, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
   <div id="stage"><svg id="svg"></svg></div>
 </div>
 <script>
@@ -199,7 +201,8 @@ function show() {
   drawList();
 }
 $("use").onchange = e => { rec(names[cur]).use = e.target.checked; save(); drawList(); };
-$("facing").onchange = e => { rec(names[cur]).facing = e.target.value; save(); };
+$("facing").onchange = e => { rec(names[cur]).facing = e.target.value; save();
+  say(SERVED ? "머리 쪽을 바꿨습니다. 점을 그쪽에 맞춰 다시 놓으려면 「초안 다시 달기」를 누르세요 (손으로 고친 점은 새 초안으로 바뀝니다)" : ""); };
 $("kind").onchange = e => { rec(names[cur]).kind = e.target.value; $("kindnote").style.display = e.target.value === "기타" ? "" : "none"; save(); drawList(); };
 $("kindnote").oninput = e => { rec(names[cur]).kind_note = e.target.value; save(); drawList(); };
 $("names").onchange = show;
@@ -217,12 +220,13 @@ $("redraft").onclick = () => {
   if (!SERVED) { say("이 단추는 python tools/label_server.py 로 띄운 주소(http://127.0.0.1:8765/)에서만 됩니다"); return; }
   const n = names[cur], r = rec(n);
   say("규칙을 다시 돌리는 중…"); $("redraft").disabled = true;
-  fetch("redraft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n, rotate: r.rotate || 0 }) })
+  fetch("redraft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n, rotate: r.rotate || 0, facing: r.facing || "" }) })
     .then(x => x.json()).then(x => {
       $("redraft").disabled = false;
       if (!x.ok) { say("초안 못 닮: " + x.message); return; }
       for (const [name] of JOINTS) if (x.joints[name]) r.joints[name] = [x.joints[name][0], x.joints[name][1], 1];
       delete r.joints.head; rec(n);   // 머리는 새 목 · 어깨에서 다시 어림
+      if (!r.facing && x.facing) r.facing = x.facing;   // 규칙이 짐작한 머리 쪽을 칸에 채운다
       r.done = false; save(); show();
       say(x.found ? "초안을 다시 달았습니다" : "규칙이 다리를 못 찾아 기본 뼈대를 놓았습니다");
     }).catch(() => { $("redraft").disabled = false; say("서버에 닿지 않습니다"); });

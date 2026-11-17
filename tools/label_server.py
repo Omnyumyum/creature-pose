@@ -28,8 +28,9 @@ LABELS = SET / "labels.json"
 PORT = 8765
 
 
-def redraft(name: str, deg: float) -> dict:
-    """그림을 deg 도(시계 방향) 돌려 규칙을 다시 돌리고, 관절을 원본 좌표로 되돌린다"""
+def redraft(name: str, deg: float, facing: str | None = None) -> dict:
+    """그림을 deg 도(시계 방향) 돌려 규칙을 다시 돌리고, 관절을 원본 좌표로 되돌린다.
+    facing 은 바로 세운 화면에서 머리가 있는 쪽(left · right). 주면 규칙이 추측하지 않고 그쪽을 머리로 본다"""
     src = SET / Path(name).name
     im = Image.open(src).convert("RGB")
     w, h = im.size
@@ -38,7 +39,7 @@ def redraft(name: str, deg: float) -> dict:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d) / "upright.png"
         rot.save(tmp)
-        r = analyze(tmp)
+        r = analyze(tmp, facing)
     if not r:
         return {"ok": False, "message": "AI 서버에 닿지 않습니다 (도커의 AI 서버가 켜져 있는지 확인)"}
     if not r.get("joints"):
@@ -46,11 +47,13 @@ def redraft(name: str, deg: float) -> dict:
     th = math.radians(deg)
     co, si = math.cos(th), math.sin(th)
     joints = {}
+    by = {j["name"]: j for j in r["joints"]}
+    guess = ("right" if by["neck"]["x"] > by["hip"]["x"] else "left") if "neck" in by and "hip" in by else ""   # 세운 화면 기준
     for j in r["joints"]:
         dx, dy = j["x"] - W / 2, j["y"] - H / 2
         x, y = w / 2 + dx * co + dy * si, h / 2 - dx * si + dy * co
         joints[j["name"]] = [round(min(max(x, 0), w)), round(min(max(y, 0), h))]
-    return {"ok": True, "found": bool(r.get("success") and r.get("joints_found")), "joints": joints}
+    return {"ok": True, "found": bool(r.get("success") and r.get("joints_found")), "joints": joints, "facing": guess}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -84,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if self.path == "/redraft":
             try:
-                self._json(redraft(body["name"], float(body.get("rotate", 0))))
+                self._json(redraft(body["name"], float(body.get("rotate", 0)), body.get("facing") or None))
             except Exception as e:  # noqa: BLE001
                 self._json({"ok": False, "message": str(e)[:200]})
         elif self.path == "/labels":
