@@ -5,6 +5,9 @@ data/testset/quadruped/auto.json(규칙이 단 초안)을 읽어 한 장짜리 H
   - 그림마다 「시험에 씀 / 뺌」(네 발로 선 그림이 아니면 뺌)과 머리 쪽(왼쪽 · 오른쪽)을 고른다.
   - 돌아간 그림은 회전 단추(90도 · 5도)로 바로 세운다. 점은 그림과 함께 돈다.
     정답 좌표는 늘 원본 PNG 기준으로 저장하고, 바로 세우는 각도(rotate, 시계 방향 도)를 따로 적는다.
+  - 머리(head) 관절은 서비스 정의에 없는 것을 이 실험에서 더했다(기린처럼 목이 긴 그림). 초안은 어깨 → 목 방향으로 조금 더 간 자리.
+  - 꼬리가 없거나 다리가 넷보다 적게 그려진 그림은 「없는 부위」 단추로 그 부위를 통째로 「안 보임」으로 한다.
+    다리 약속: 앞 · 뒤 각각 한 개만 그렸으면 「1」에 놓고 「2」를 없음으로. 두 개면 몸 가운데 쪽이 1, 바깥쪽(머리 끝 · 꼬리 끝 쪽)이 2.
   - 고친 것은 브라우저에 바로 저장되고, 「내보내기」를 누르면 labels_quadruped.json 을 받는다.
     받은 파일을 data/testset/quadruped/labels.json 으로 옮기면 그것이 정답이다.
 
@@ -18,8 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SET = ROOT / "data/testset/quadruped"
 
 # 관절 이름 · 화면 이름은 drawtale-ai runtime/ai_server/forms/quadruped.json (dev 4c2147f) 그대로.
-# 부모는 화면에 선을 긋는 용도라 다리를 몸통 쪽에 이었다(원본은 다리 위 관절의 부모가 root)
-JOINTS = [("hip", None, "엉덩이"), ("torso", "hip", "어깨"), ("neck", "torso", "목"),
+# 부모는 화면에 선을 긋는 용도라 다리를 몸통 쪽에 이었다(원본은 다리 위 관절의 부모가 root).
+# head 는 서비스 정의에 없고 이 실험에서 더한 관절이다 (2026-11-17, 목이 긴 동물)
+JOINTS = [("hip", None, "엉덩이"), ("torso", "hip", "어깨"), ("neck", "torso", "목"), ("head", "neck", "머리"),
           ("right_hip_b", "hip", "뒷다리 1 위"), ("right_knee_b", "right_hip_b", "뒷다리 1 무릎"), ("right_foot_b", "right_knee_b", "뒷다리 1 발"),
           ("left_hip_b", "hip", "뒷다리 2 위"), ("left_knee_b", "left_hip_b", "뒷다리 2 무릎"), ("left_foot_b", "left_knee_b", "뒷다리 2 발"),
           ("right_hip_f", "torso", "앞다리 1 위"), ("right_knee_f", "right_hip_f", "앞다리 1 무릎"), ("right_foot_f", "right_knee_f", "앞다리 1 발"),
@@ -43,6 +47,7 @@ PAGE = r"""<!doctype html>
   circle.gone { fill: #bbb !important; opacity: .6; }
   text { font-size: 11px; paint-order: stroke; stroke: #fff; stroke-width: 3px; pointer-events: none; }
   button { font: inherit; padding: 4px 10px; }
+  button.grp.off { background: #bbb; color: #fff; text-decoration: line-through; }
   #help { color: #555; font-size: 13px; }
 </style></head><body>
 <div id="list"></div>
@@ -59,7 +64,13 @@ PAGE = r"""<!doctype html>
     <button id="export">내보내기</button>
     <span id="count"></span>
   </div>
-  <div id="bar"><span id="help">돌아간 그림은 먼저 회전 단추로 바로 세웁니다. 점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
+  <div id="bar"><span>없는 부위(누르면 통째로 안 보임, 다시 누르면 되살림):</span>
+    <button class="grp" data-g="tail">꼬리</button>
+    <button class="grp" data-g="_f1">앞다리 1</button><button class="grp" data-g="_f2">앞다리 2</button>
+    <button class="grp" data-g="_b1">뒷다리 1</button><button class="grp" data-g="_b2">뒷다리 2</button>
+    <button class="grp" data-g="head">머리</button>
+    <span id="help2" style="color:#555;font-size:13px">다리를 하나만 그렸으면 「1」에 놓고 「2」를 없음으로. 두 개면 몸 가운데 쪽이 1, 바깥쪽이 2.</span></div>
+  <div id="bar"><span id="help">돌아간 그림은 먼저 회전 단추로 바로 세웁니다. 점을 끌어 옮깁니다. 그림에 없는 부위는 점을 오른쪽 클릭해 「안 보임」(회색)으로. 빨강 = 뒷다리, 파랑 = 앞다리, 초록 = 몸통 · 목 · 머리, 보라 = 꼬리. 고친 것은 바로 저장됩니다.</span></div>
   <div id="stage"><svg id="svg"></svg></div>
 </div>
 <script>
@@ -69,18 +80,29 @@ try { labels = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
 const names = Object.keys(DATA).sort();
 let cur = 0;
 const $ = id => document.getElementById(id), NS = "http://www.w3.org/2000/svg";
-const color = n => n.endsWith("_b") ? "#d23" : n.endsWith("_f") ? "#25d" : n.startsWith("tail") ? "#93c" : "#1a8f3c";
+const color = n => n.endsWith("_b") ? "#d23" : n.endsWith("_f") ? "#25d" : n.startsWith("tail") ? "#93c" : n === "head" ? "#0a5c2a" : "#1a8f3c";
 function save() { try { localStorage.setItem(KEY, JSON.stringify(labels)); } catch (e) {} }
-function rec(n) {
-  if (!labels[n]) {
-    const a = DATA[n], j = {};
-    for (const [name] of JOINTS) {
-      const p = a.joints[name];
-      j[name] = p ? [p[0], p[1], 1] : [a.width / 2, a.height / 2, 1];
-    }
-    labels[n] = { use: true, facing: "", done: false, rotate: 0, joints: j };
+function draft(n, name, j) {
+  const a = DATA[n], p = a.joints[name];
+  if (p) return [p[0], p[1], 1];
+  if (name === "head" && j.neck && j.torso) {   // 어깨 → 목 방향으로 그 길이의 0.8배 더
+    const x = j.neck[0] + (j.neck[0] - j.torso[0]) * .8, y = j.neck[1] + (j.neck[1] - j.torso[1]) * .8;
+    return [Math.round(Math.max(0, Math.min(a.width, x))), Math.round(Math.max(0, Math.min(a.height, y))), 1];
   }
+  return [a.width / 2, a.height / 2, 1];
+}
+function rec(n) {
+  if (!labels[n]) labels[n] = { use: true, facing: "", done: false, rotate: 0, joints: {} };
+  const j = labels[n].joints;
+  for (const [name] of JOINTS) if (!j[name]) j[name] = draft(n, name, j);   // 예전에 저장한 것에 없는 관절(머리)도 채운다
   return labels[n];
+}
+const GROUPS = { tail: ["tail", "tail_mid", "tail_tip"], head: ["head"],
+  _f1: ["right_hip_f", "right_knee_f", "right_foot_f"], _f2: ["left_hip_f", "left_knee_f", "left_foot_f"],
+  _b1: ["right_hip_b", "right_knee_b", "right_foot_b"], _b2: ["left_hip_b", "left_knee_b", "left_foot_b"] };
+function groupButtons() {
+  const r = rec(names[cur]);
+  document.querySelectorAll("button.grp").forEach(b => b.classList.toggle("off", GROUPS[b.dataset.g].every(k => !r.joints[k][2])));
 }
 function drawList() {
   $("list").innerHTML = "";
@@ -144,16 +166,22 @@ function show() {
       const up = () => { c.removeEventListener("pointermove", move); c.removeEventListener("pointerup", up); save(); };
       c.addEventListener("pointermove", move); c.addEventListener("pointerup", up);
     });
-    c.addEventListener("contextmenu", e => { e.preventDefault(); p[2] = p[2] ? 0 : 1; put(); place(); save(); });
+    c.addEventListener("contextmenu", e => { e.preventDefault(); p[2] = p[2] ? 0 : 1; put(); place(); save(); groupButtons(); });
     svg.appendChild(c); svg.appendChild(t);
   }
   $("name").textContent = `${n}  (${a.source}: ${a.note})`;
   $("use").checked = r.use; $("facing").value = r.facing;
+  groupButtons();
   drawList();
 }
 $("use").onchange = e => { rec(names[cur]).use = e.target.checked; save(); drawList(); };
 $("facing").onchange = e => { rec(names[cur]).facing = e.target.value; save(); };
 $("names").onchange = show;
+document.querySelectorAll("button.grp").forEach(b => b.onclick = () => {
+  const r = rec(names[cur]), ks = GROUPS[b.dataset.g], off = ks.every(k => !r.joints[k][2]);
+  ks.forEach(k => { r.joints[k][2] = off ? 1 : 0; });
+  save(); show();
+});
 const turn = d => { const r = rec(names[cur]); r.rotate = (((r.rotate || 0) + d) % 360 + 360) % 360; save(); show(); };
 $("rl90").onclick = () => turn(-90); $("rr90").onclick = () => turn(90);
 $("rl5").onclick = () => turn(-5); $("rr5").onclick = () => turn(5);
