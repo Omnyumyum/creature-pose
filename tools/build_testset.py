@@ -45,8 +45,9 @@ def prepare(src: str, dst: Path) -> None:
     im.save(dst)
 
 
-def analyze(path: Path, facing: str | None = None) -> dict | None:
-    """facing: 머리 쪽 left · right 를 알려 주면 규칙이 그쪽을 머리로 본다. 없으면 규칙이 추측한다"""
+def analyze(path: Path, facing: str | None = None, cutout: bool = False) -> dict | None:
+    """facing: 머리 쪽 left · right 를 알려 주면 규칙이 그쪽을 머리로 본다. 없으면 규칙이 추측한다.
+    cutout: 분석이 만든 오린 그림(PNG, 투명도 = 몸 마스크)을 결과의 "_cutout" 에 바이트로 붙인다"""
     b = uuid.uuid4().hex
     side = f'--{b}\r\nContent-Disposition: form-data; name="facing"\r\n\r\n{facing}\r\n' if facing in ("left", "right") else ""
     body = (f'--{b}\r\nContent-Disposition: form-data; name="form"\r\n\r\nquadruped\r\n{side}'
@@ -56,6 +57,11 @@ def analyze(path: Path, facing: str | None = None) -> dict | None:
         req = request.Request(AI + "/analyze", data=body, headers={"Content-Type": f"multipart/form-data; boundary={b}"})
         r = json.loads(request.urlopen(req, timeout=300).read())
         if r.get("request_id"):
+            if cutout:
+                try:
+                    r["_cutout"] = request.urlopen(f"{AI}/sessions/{r['request_id']}/cutout", timeout=60).read()
+                except Exception:  # noqa: BLE001
+                    pass
             request.urlopen(request.Request(f"{AI}/sessions/{r['request_id']}", method="DELETE"), timeout=60).read()
         return r
     except Exception as e:  # noqa: BLE001

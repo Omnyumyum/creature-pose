@@ -6,40 +6,33 @@
   - 고친 것을 data/testset/quadruped/labels.json 에 바로 저장하고, 다시 열면 거기서 읽는다.
 
     python tools/make_labeler.py     (화면 파일 만들기, 그림이 바뀌었을 때만)
-    python tools/label_server.py     → http://127.0.0.1:8765/
+    work/venv/Scripts/python tools/label_server.py     → http://127.0.0.1:8765/   (numpy 가 필요해 work/venv 로 띄운다)
+다른 그림 묶음은 `--set qd_pilot` (tools/sets.py, 포트 8766). `/facing` 은 머리 쪽만 빨리 누르는 화면, `/judge` 는 초안이 맞는지만 고르는 화면.
 """
 
 import json
 import math
 import sys
-import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
-from build_testset import analyze  # noqa: E402
+from body_rule import analyze_upright, body_points  # noqa: E402
+from sets import page_path, pick  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
-SET = ROOT / "data/testset/quadruped"
-PAGE = ROOT / "data/testset/label_quadruped.html"
+NAME, SET, PORT, _ = pick()
+PAGE = page_path(SET)
+FACING = page_path(SET, "facing")
 LABELS = SET / "labels.json"
-PORT = 8765
 
 
 def redraft(name: str, deg: float, facing: str | None = None) -> dict:
     """그림을 deg 도(시계 방향) 돌려 규칙을 다시 돌리고, 관절을 원본 좌표로 되돌린다.
     facing 은 바로 세운 화면에서 머리가 있는 쪽(left · right). 주면 규칙이 추측하지 않고 그쪽을 머리로 본다"""
-    src = SET / Path(name).name
-    im = Image.open(src).convert("RGB")
-    w, h = im.size
-    rot = im.rotate(-deg, expand=True, fillcolor="white", resample=Image.BICUBIC)   # PIL 은 반시계가 양수
-    W, H = rot.size
-    with tempfile.TemporaryDirectory() as d:
-        tmp = Path(d) / "upright.png"
-        rot.save(tmp)
-        r = analyze(tmp, facing)
+    w, h = Image.open(SET / Path(name).name).size
+    r, (W, H) = analyze_upright(SET, name, deg, facing)   # 마스크도 남긴다(몸통 자리 계산용)
     if not r:
         return {"ok": False, "message": "AI 서버에 닿지 않습니다 (도커의 AI 서버가 켜져 있는지 확인)"}
     if not r.get("joints"):
@@ -72,9 +65,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        elif path in ("/facing", "/judge") and page_path(SET, path[1:]).exists():   # 머리 쪽 누르기 · 초안 고르기
+            self._send(200, page_path(SET, path[1:]).read_bytes(), "text/html; charset=utf-8")
         elif path == "/labels":
             self._json(json.load(open(LABELS, encoding="utf-8")) if LABELS.exists() else {})
-        elif path.startswith("/quadruped/") and path.endswith(".png"):
+        elif path.startswith(("/img/", "/quadruped/")) and path.endswith(".png"):
             f = SET / Path(path).name
             if f.exists():
                 self._send(200, f.read_bytes(), "image/png")
@@ -88,6 +83,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/redraft":
             try:
                 self._json(redraft(body["name"], float(body.get("rotate", 0)), body.get("facing") or None))
+            except Exception as e:  # noqa: BLE001
+                self._json({"ok": False, "message": str(e)[:200]})
+        elif self.path == "/body":   # 몸통 세 점을 다리 자리에서 계산 (tools/body_rule.py)
+            try:
+                got = body_points(SET, body["name"], float(body.get("rotate", 0)), body.get("joints") or {})
+                self._json({"ok": True, "joints": got} if got else {"ok": False, "message": "앞다리와 뒷다리가 하나씩은 있어야 합니다"})
             except Exception as e:  # noqa: BLE001
                 self._json({"ok": False, "message": str(e)[:200]})
         elif self.path == "/labels":
@@ -104,6 +105,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     if not PAGE.exists():
-        sys.exit("먼저 python tools/make_labeler.py 를 돌린다")
+        sys.exit(f"먼저 python tools/make_labeler.py --set {NAME} 을 돌린다")
     print(f"정답 표시 도구: http://127.0.0.1:{PORT}/   (끄려면 Ctrl+C)", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
