@@ -14,6 +14,7 @@
     python train/quad_model.py test  [--tag v1]                                 (시험 세트가 있는 PC 에서만: 아이 그림이라 저장소에 없다)
     python train/quad_model.py train --synth 5000 --tag v2                      (에폭마다 합성 마스크 5,000장을 새로 만들어 섞는다. train/synth_quad.py)
     python train/quad_model.py train --synth 5000 --real 0 --tag v2s            (합성만)
+    python train/quad_model.py train --arch r50 --init ap10k --tag v3           (AP-10K 동물 사진 가중치에서 시작. 견줄 것: --arch r50 --tag v3i 는 ImageNet 에서)
     python train/quad_model.py train --dry                                      (몇 장만 넣어 끝까지 도는지 확인, 학습 아님)
 학습 정답은 trainset/quad_v1/ (tools/export_train.py 가 만든다). 학습은 집 PC(RTX 5080)에서, 시험은 시험 세트가 있는 노트북에서 한다. 설치는 train/INSTALL.md
 """
@@ -156,21 +157,52 @@ class Data(torch.utils.data.Dataset):
 
 # ── 모델 ────────────────────────────────────────────────────────────────
 
+# MMPose 가 나눠 주는 AP-10K(네 발 동물 사진 54종, 17점) 학습 가중치. ResNet-50 SimpleBaseline 256x256.
+# 데이터 조건이 상업 이용에 걸리는지 확인이 끝나지 않았다. 지금은 비상업 실험이라 쓰고, 운영에 올리기 전에 다시 확인한다.
+AP10K_URL = "https://download.openmmlab.com/mmpose/animal/resnet/res50_ap10k_256x256-35760eb8_20211029.pth"
+
+
+def ap10k_weights() -> dict:
+    """AP-10K 가중치를 우리 층 이름으로. 등뼈대(backbone)와 위로 키우는 층 3개를 물려받고, 마지막 층(17점)은 관절 정의가 달라 버린다"""
+    ck = torch.hub.load_state_dict_from_url(AP10K_URL, model_dir=str(ROOT / "work/pretrained"), map_location="cpu", check_hash=True, weights_only=True)
+    sd = ck.get("state_dict", ck)
+    back = {k[len("backbone."):]: v for k, v in sd.items() if k.startswith("backbone.")}
+    up = {k[len("keypoint_head.deconv_layers."):]: v for k, v in sd.items() if k.startswith("keypoint_head.deconv_layers.")}
+    return {"backbone": back, "up": up}
+
+
 class Net(nn.Module):
-    def __init__(self, joints: int = 18, pretrained: bool = True) -> None:
+    """arch r18: ResNet-18 + 128칸 층(처음 것). r50: ResNet-50 + 256칸 층(AP-10K 가중치와 같은 꼴). init: imagenet · ap10k · none"""
+
+    def __init__(self, joints: int = 18, pretrained: bool = True, arch: str = "r18", init: str = "imagenet") -> None:
         super().__init__()
+        make, wts, c, width = ((torchvision.models.resnet50, torchvision.models.ResNet50_Weights.DEFAULT, 2048, 256) if arch == "r50"
+                               else (torchvision.models.resnet18, torchvision.models.ResNet18_Weights.DEFAULT, 512, 128))
+        if not pretrained:
+            init = "none"
+        if init == "ap10k" and arch != "r50":
+            raise SystemExit("--init ap10k 는 --arch r50 과 함께 쓴다 (가중치가 ResNet-50 것)")
         try:
-            r = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT if pretrained else None)
+            r = make(weights=wts if init == "imagenet" else None)
         except Exception as e:  # noqa: BLE001
             print("ImageNet 가중치를 못 받아 처음부터 학습:", str(e)[:80])
-            r = torchvision.models.resnet18(weights=None)
+            r = make(weights=None)
+        ap = ap10k_weights() if init == "ap10k" else None
+        if ap:
+            miss = r.load_state_dict(ap["backbone"], strict=False)
+            left = [k for k in miss.missing_keys if not k.startswith("fc.")]
+            if left or miss.unexpected_keys:
+                raise SystemExit(f"AP-10K 등뼈대 층 이름이 안 맞음: 빠짐 {left[:3]} 남음 {miss.unexpected_keys[:3]}")
         self.stem = nn.Sequential(r.conv1, r.bn1, r.relu, r.maxpool, r.layer1, r.layer2, r.layer3, r.layer4)
-        up, c = [], 512
+        up = []
         for _ in range(3):
-            up += [nn.ConvTranspose2d(c, 128, 4, 2, 1, bias=False), nn.BatchNorm2d(128), nn.ReLU(inplace=True)]
-            c = 128
+            up += [nn.ConvTranspose2d(c, width, 4, 2, 1, bias=False), nn.BatchNorm2d(width), nn.ReLU(inplace=True)]
+            c = width
         self.up = nn.Sequential(*up)
-        self.out = nn.Conv2d(128, joints, 1)
+        if ap:
+            self.up.load_state_dict(ap["up"])           # 층 번호(0 · 1 · 3 · 4 · 6 · 7)가 MMPose 와 같다
+            print("AP-10K 가중치로 시작 (등뼈대 + 위로 키우는 층)", flush=True)
+        self.out = nn.Conv2d(width, joints, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.out(self.up(self.stem(x.repeat(1, 3, 1, 1) * 2 - 1)))
@@ -234,14 +266,15 @@ def train() -> None:
         synth = 8
     print(f"학습 {len(tr) if real else 0}장 + 합성 에폭마다 {synth}장 · 확인 {len(val)}장 · 장치 {DEV}", flush=True)
     torch.manual_seed(0)
-    net = Net(len(data["order"])).to(DEV)
-    opt = torch.optim.AdamW(net.parameters(), lr=1e-3, weight_decay=1e-4)
+    arch, init, lr = arg("--arch", "r18"), arg("--init", "imagenet"), arg("--lr", 1e-3)
+    net = Net(len(data["order"]), arch=arch, init=init).to(DEV)
+    opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     repeat = 1 if dry else max(1, round(960 / len(tr)))
     parts = ([Data(tr, True, repeat)] if real else []) + ([Synth(synth)] if synth else [])
     dl = torch.utils.data.DataLoader(torch.utils.data.ConcatDataset(parts), batch_size=4 if dry else 64 if synth else 32, shuffle=True, drop_last=True,
                                      num_workers=0 if dry else workers, persistent_workers=bool(workers) and not dry)
     dv = torch.utils.data.DataLoader(Data(val, False), batch_size=32)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=epochs * len(dl), pct_start=0.1)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * len(dl), pct_start=0.1)
     log, best = [], -1.0
     out = MODELS
     out.mkdir(parents=True, exist_ok=True)
@@ -268,7 +301,7 @@ def train() -> None:
         if acc >= best:
             best = acc
             torch.save(net.state_dict(), out / f"quad_{tag}.pth")
-    res = {"tag": tag, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
+    res = {"tag": tag, "arch": arch, "init": init, "lr": lr, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
     if (ROOT / "data/testset/quadruped/labels.json").exists():
         res["test"] = test(tag)
     else:
@@ -284,8 +317,9 @@ def test(tag: str) -> dict:
     folder = ROOT / "data/testset/quadruped"
     labels = json.load(open(folder / "labels.json", encoding="utf-8"))
     order = json.load(open(TRAIN / "labels.json", encoding="utf-8"))["order"]
-    net = Net(len(order), pretrained=False).to(DEV)
-    net.load_state_dict(torch.load(MODELS / f"quad_{tag}.pth", map_location=DEV))
+    sd = torch.load(MODELS / f"quad_{tag}.pth", map_location=DEV, weights_only=True)
+    net = Net(len(order), pretrained=False, arch="r50" if sd["up.0.weight"].shape[0] == 2048 else "r18").to(DEV)   # 꼴은 가중치에서 읽는다
+    net.load_state_dict(sd)
     net.eval()
     used = {n: r for n, r in labels.items() if r.get("use")}
     from PIL import Image
