@@ -5,7 +5,7 @@
 형태는 어른이 골라 주므로(서비스의 형태 고르기) 모델이 맞히지 않는다. 고른 형태의 출력층만 읽는다.
 
   형태     quad (네 발, 관절 18, 사람 정답 trainset/quad_v1 + 합성 synth_quad)
-           wing (날개형, 관절 8, 합성 synth_wing 만. 사람 정답은 아직 없다)
+           wing (날개형, 날개 하나 기준 관절 5, 합성 synth_wing 만. 사람 정답은 아직 없다)
   학습     걸음마다 형태를 번갈아 한 묶음씩. 입력 · 늘리기 · 히트맵은 quad_model.py 와 같다
   저장     models/<형태>_<tag>.pth 를 형태마다 하나씩, quad_model.py 의 Net 과 같은 꼴로 (등뼈대는 같은 값이 들어간다)
            → 네 발은 지금 시험 그대로: python train/quad_model.py test --tag <tag>
@@ -36,16 +36,11 @@ import synth_wing  # noqa: E402
 IN, DEV, arg = Q.IN, Q.DEV, Q.arg
 
 
-def _wing_fix(pts: np.ndarray, w: np.ndarray) -> None:
-    """날개 번호 약속(끝이 왼쪽인 것이 wing1)을 뒤집기 · 돌리기 뒤에도 지킨다"""
-    if pts[4, 0] > pts[7, 0]:
-        pts[[2, 3, 4, 5, 6, 7]] = pts[[5, 6, 7, 2, 3, 4]]
-        w[[2, 3, 4, 5, 6, 7]] = w[[5, 6, 7, 2, 3, 4]]
-
-
+# reduce: 늘리기를 한 뒤의 좌표에서 관절을 줄이는 함수. 날개형은 날개 하나가 기준이라 합성기가 준 후보 둘(8점) 중 하나(5점)를 여기서 고른다
+#         (「길이가 비슷하면 왼쪽」이 뒤집기 뒤에도 맞으려면 뒤집은 다음에 골라야 한다). 사람 정답은 이미 5점이라 그대로 지난다
 FORMS = {
-    "quad": {"order": synth_quad.ORDER, "gen": synth_quad.generate, "real": ROOT / "trainset/quad_v1", "fix": None},
-    "wing": {"order": synth_wing.ORDER, "gen": synth_wing.generate, "real": None, "fix": _wing_fix},
+    "quad": {"order": synth_quad.ORDER, "gen": synth_quad.generate, "real": ROOT / "trainset/quad_v1", "reduce": None},
+    "wing": {"order": synth_wing.ORDER, "gen": synth_wing.generate, "real": None, "reduce": synth_wing.pick_one},
 }
 
 
@@ -70,8 +65,9 @@ def sample(form: str, mask: np.ndarray, joints: np.ndarray, weights: np.ndarray,
         m = Q.roughen(m, rng)
     pts = Q.apply(M, joints)
     w = weights.astype(np.float32).copy()
-    if FORMS[form]["fix"]:
-        FORMS[form]["fix"](pts, w)
+    n = len(FORMS[form]["order"])
+    if FORMS[form]["reduce"] and len(pts) != n:
+        pts, w = FORMS[form]["reduce"](pts), np.ones(n, np.float32)
     w = w * ((pts >= 0) & (pts < IN)).all(axis=1)
     return (torch.from_numpy(m[None].astype(np.float32)), torch.from_numpy(Q.heatmaps(pts)), torch.from_numpy(w.astype(np.float32)),
             torch.from_numpy(pts.astype(np.float32)))

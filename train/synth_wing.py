@@ -1,7 +1,7 @@
 """날개형(새 · 나비 · 잠자리) 몸 마스크를 만들어 내는 합성기 (2026-11-20). 네 발의 synth_quad.py 와 같은 쓰임.
 
 세 가지 꼴을 그린다.
-  옆모습 새      몸통(타원) + 머리(앞 위) + 부리 + 꼬리 + 다리 + 등 위로 솟은 날개 0 ~ 2개. 머리는 늘 오른쪽(뒤집기는 학습 때 늘리기가 한다)
+  옆모습 새      몸통(타원) + 머리(앞 위) + 부리 + 꼬리 + 다리 + 등 위로 솟은 날개 0 ~ 2개(대부분 하나). 머리는 늘 오른쪽(뒤집기는 학습 때 늘리기가 한다)
   위에서 본 것   나비 · 잠자리: 세로로 긴 몸 + 위쪽 머리 + 왼쪽 · 오른쪽 날개(한 장 또는 위아래 두 장이 붙은 것) + 더듬이
   앞모습 새      둥근 몸 + 위에 머리 + 양옆으로 든 날개 + 다리
 
@@ -9,9 +9,11 @@
   - body = 몸통 가운데, head = 머리 가운데
   - 날개 뿌리 = 날개가 몸통에 닿는 자리의 가운데, 끝 = 날개 안에서 뿌리로부터 가장 먼 곳, 가운데 = 둘의 한가운데
   - 몸 밖으로 솟은 날개가 없으면(몸 안에 그린 날개) 날개 점 여섯을 모두 몸통에 겹친다
-  - 날개가 하나면 날개 2 를 날개 1 에 겹친다
-  - 둘이면 그림에서 끝이 더 왼쪽인 것이 wing1 (서비스는 넓이 순이지만 둘 다 같이 퍼덕여 번호는 뜻이 없다. 학습에는 흔들리지 않는 약속이 필요해 왼쪽으로 정함.
-    좌우 뒤집기를 하면 번호를 맞바꾼다: multi_model.py FORMS 의 swap)
+  - **날개형은 날개 하나가 기준이다** (사용자 2026-11-20. 서비스 안내도 「날개는 하나만, 등 위로 크게 솟게」, 형태 정의의 view 는 side).
+    그래서 모델이 내는 관절은 다섯: 몸통 · 머리 · 날개 뿌리 · 가운데 · 끝 (ORDER). 서비스에 붙일 때는 날개 1 · 2 에 같은 값을 넣는다(to_service)
+  - 날개가 둘 보이는 그림(나비 · 앞모습 새)은 하나만 고른다: 더 긴 날개, 길이가 비슷하면(10% 안) 끝이 더 왼쪽인 것 (pick_one).
+    이 고르기는 학습 때 뒤집기 · 돌리기를 한 뒤의 그림에서 한다. 그래야 「비슷하면 왼쪽」이 늘 맞는다.
+    그래서 generate 는 후보 둘을 다 돌려준다(관절 8개, CAND 순서)
 
     python train/synth_wing.py [장 수=24]   → work/synth_wing_look.jpg (눈으로 보기)
 """
@@ -23,7 +25,21 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ORDER = ["body", "head", "wing1_root", "wing1_mid", "wing1_tip", "wing2_root", "wing2_mid", "wing2_tip"]
+ORDER = ["body", "head", "wing_root", "wing_mid", "wing_tip"]                      # 모델이 내는 관절 (날개 하나)
+CAND = ["body", "head", "wing1_root", "wing1_mid", "wing1_tip", "wing2_root", "wing2_mid", "wing2_tip"]   # generate 가 돌려주는 후보 (날개 둘까지)
+
+
+def pick_one(pts: np.ndarray) -> np.ndarray:
+    """후보 8점 → 날개 하나 5점. 더 긴 날개, 비슷하면 끝이 더 왼쪽인 것"""
+    a, b = np.hypot(*(pts[4] - pts[2])), np.hypot(*(pts[7] - pts[5]))
+    first = (pts[4, 0] <= pts[7, 0]) if abs(a - b) <= 0.1 * max(a, b, 1e-6) else a > b
+    return pts[[0, 1, 2, 3, 4]] if first else pts[[0, 1, 5, 6, 7]]
+
+
+def to_service(pts: np.ndarray) -> dict:
+    """5점 → 서비스 관절 이름 8개 (날개 2 는 날개 1 에 겹친다)"""
+    j = dict(zip(ORDER, pts))
+    return {"body": j["body"], "head": j["head"], **{f"wing{k}_{part}": j[f"wing_{part}"] for k in (1, 2) for part in ("root", "mid", "tip")}}
 S = 448
 
 
@@ -205,9 +221,9 @@ def _front_bird(rng: np.random.Generator):  # noqa: ANN202
 
 
 def generate(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """(마스크 bool SxS, 관절 8x2)"""
-    kind = rng.random()
-    body, rest, wings, bc, hc = (_side_bird if kind < 0.55 else _top_view if kind < 0.85 else _front_bird)(rng)
+    """(마스크 bool SxS, 후보 관절 8x2: CAND 순서). 날개 하나로 줄이기는 pick_one"""
+    kind = rng.random()                                   # 옆모습 새가 기준이라 가장 많이
+    body, rest, wings, bc, hc = (_side_bird if kind < 0.7 else _top_view if kind < 0.88 else _front_bird)(rng)
     solid = body | rest                                   # 날개를 뺀 몸 (머리 · 꼬리 · 다리 포함): 날개 뿌리는 여기에 닿는 자리
     found = [p for p in (_wing_points(w, solid) for w in wings) if p is not None]
     found.sort(key=lambda p: p[2][0])                     # 끝이 왼쪽인 것이 wing1
@@ -236,10 +252,9 @@ if __name__ == "__main__":
     for i in range(count):
         mask, pts = generate(rng)
         im = cv2.cvtColor(mask.astype(np.uint8) * 255, cv2.COLOR_GRAY2BGR)
-        for k, (x, y) in zip(ORDER, pts):
-            c = (60, 170, 0) if k == "body" else (0, 140, 255) if k == "head" else (50, 40, 210) if k.startswith("wing1") else (220, 90, 40)
-            r = 4 if k.endswith("_mid") else 8 if k.startswith("wing1") or k in ("body", "head") else 5      # wing2 는 작게: 겹쳐도 둘 다 보인다
-            cv2.circle(im, (int(x), int(y)), r, c, -1)
+        for k, (x, y) in zip(ORDER, pick_one(pts)):
+            c = (60, 170, 0) if k == "body" else (0, 140, 255) if k == "head" else (50, 40, 210)
+            cv2.circle(im, (int(x), int(y)), 4 if k.endswith("_mid") else 8, c, -1)
         sheet[(i // cols) * 300:(i // cols) * 300 + 300, (i % cols) * 300:(i % cols) * 300 + 300] = cv2.resize(im, (300, 300), interpolation=cv2.INTER_AREA)
     out = Path(__file__).resolve().parent.parent / "work/synth_wing_look.jpg"
     cv2.imwrite(str(out), sheet, [cv2.IMWRITE_JPEG_QUALITY, 85])

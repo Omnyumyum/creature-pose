@@ -53,7 +53,7 @@ venv\Scripts\python train/quad_model.py train --synth 5000 --real 0 --tag v2s
 
 ## 3-2. 형태 여럿을 한 모델로 (2026-11-20 더함)
 
-등뼈대는 같이 쓰고 출력층만 형태별로 두는 방식이다. 지금 형태는 네 발(`quad`)과 날개형(`wing`: 새 · 나비 · 잠자리, 합성 마스크만으로 학습).
+등뼈대는 같이 쓰고 출력층만 형태별로 두는 방식이다. 지금 형태는 네 발(`quad`)과 날개형(`wing`: 날개 하나 기준 관절 5개, 합성 마스크만으로 학습).
 
 ```powershell
 venv\Scripts\python train/multi_model.py train --forms quad,wing --dry
