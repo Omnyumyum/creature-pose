@@ -265,8 +265,8 @@ def train() -> None:
     if dry and synth:
         synth = 8
     print(f"학습 {len(tr) if real else 0}장 + 합성 에폭마다 {synth}장 · 확인 {len(val)}장 · 장치 {DEV}", flush=True)
-    torch.manual_seed(0)
-    arch, init, lr = arg("--arch", "r18"), arg("--init", "imagenet"), arg("--lr", 1e-3)
+    arch, init, lr, seed = arg("--arch", "r18"), arg("--init", "imagenet"), arg("--lr", 1e-3), arg("--seed", 0)
+    torch.manual_seed(seed)      # 늘리기 · 합성 그림은 씨앗과 상관없이 돌릴 때마다 다르다. 씨앗은 새 층의 처음 값과 묶음 순서
     net = Net(len(data["order"]), arch=arch, init=init).to(DEV)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     repeat = 1 if dry else max(1, round(960 / len(tr)))
@@ -301,7 +301,7 @@ def train() -> None:
         if acc >= best:
             best = acc
             torch.save(net.state_dict(), out / f"quad_{tag}.pth")
-    res = {"tag": tag, "arch": arch, "init": init, "lr": lr, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
+    res = {"tag": tag, "arch": arch, "init": init, "lr": lr, "seed": seed, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
     if (ROOT / "data/testset/quadruped/labels.json").exists():
         res["test"] = test(tag)
     else:

@@ -13,7 +13,7 @@
     python train/multi_model.py train --forms quad,wing --synth 5000 --tag m1     (같이 쓰기)
     python train/multi_model.py train --forms wing --synth 5000 --tag w1          (날개만 따로: 견줄 것. 네 발만 따로는 quad_model 의 v2)
     python train/multi_model.py train --forms quad,wing --dry                     (몇 장만 넣어 끝까지 도는지 확인, 학습 아님)
-    더 줄 수 있는 것: --epochs 60  --rot 25 (돌리기 ±도)  --arch r50 --init ap10k  --workers 0
+    더 줄 수 있는 것: --epochs 60  --seed 0  --rot 25 (돌리기 ±도)  --arch r50 --init ap10k  --workers 0
 """
 
 import json
@@ -168,13 +168,14 @@ def train() -> None:
                                                  num_workers=workers, persistent_workers=bool(workers))
         print(f"{f}: 사람 정답 {n_real}장 + 합성 에폭마다 {synth}장 · 확인 {len(vals[f].dataset)}장{'' if FORMS[f]['real'] else '(합성)'}", flush=True)
     print(f"형태 {forms} · 돌리기 ±{rot:g}도 · 장치 {DEV}", flush=True)
-    torch.manual_seed(0)
+    seed = arg("--seed", 0)
+    torch.manual_seed(seed)
     net = Net(forms, arch, init).to(DEV)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     steps = max(len(d) for d in loaders.values())                  # 에폭 = 형태마다 이만큼씩
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * steps * len(forms), pct_start=0.1)
     (ROOT / "models").mkdir(exist_ok=True)
-    log, best = [], -1.0
+    log, best = [], {f: -1.0 for f in forms}
     for ep in range(epochs):
         net.train()
         t0, tot = time.time(), {f: 0.0 for f in forms}
@@ -205,13 +206,12 @@ def train() -> None:
         row = {"epoch": ep + 1, **{f"loss_{f}": round(tot[f] / steps * 1000, 4) for f in forms}, **{f"val_pck10_{f}": round(acc[f], 4) for f in forms}}
         log.append(row)
         print(f"에폭 {ep + 1:>3}  " + "  ".join(f"{f} loss {tot[f] / steps * 1000:.3f} 확인 {acc[f]:.1%}" for f in forms) + f"  {time.time() - t0:.0f}초", flush=True)
-        mean = sum(acc.values()) / len(acc)
-        if mean >= best:
-            best = mean
-            for f in forms:
+        for f in forms:                        # 형태마다 자기 확인 점수가 가장 높은 때를 저장 (평균으로 고르면 99% 에 붙은 형태 때문에 다른 형태의 출렁임만 따라간다)
+            if acc[f] >= best[f]:
+                best[f] = acc[f]
                 torch.save(net.single(f), ROOT / f"models/{f}_{tag}.pth")
     res = {"tag": tag, "forms": forms, "arch": arch, "init": init, "rot": rot, "synth_per_epoch": synth, "train_real": counts, "epochs": epochs,
-           "best_mean_val_pck10": round(best, 4), "log": log}
+           "seed": seed, "best_val_pck10": {f: round(v, 4) for f, v in best.items()}, "log": log}
     (ROOT / "out").mkdir(exist_ok=True)
     json.dump(res, open(ROOT / f"out/multi_{tag}.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("저장: " + ", ".join(f"models/{f}_{tag}.pth" for f in forms) + f", out/multi_{tag}.json")
