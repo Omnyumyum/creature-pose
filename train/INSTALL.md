@@ -51,13 +51,30 @@ venv\Scripts\python train/quad_model.py train --synth 5000 --real 0 --tag v2s
 - 에폭마다 `확인 PCK@0.1` 이 찍힌다. 따로 떼어 둔 Quick, Draw! 29장에서 잰 값이라 실제 아이 그림 점수는 아니다.
 - 결과: `models/quad_<이름>.pth` (약 60MB), `out/quad_<이름>.json` (에폭별 기록).
 
+## 3-2. 형태 여럿을 한 모델로 (2026-11-20 더함)
+
+등뼈대는 같이 쓰고 출력층만 형태별로 두는 방식이다. 지금 형태는 네 발(`quad`)과 날개형(`wing`: 새 · 나비 · 잠자리, 합성 마스크만으로 학습).
+
+```powershell
+venv\Scripts\python train/multi_model.py train --forms quad,wing --dry
+venv\Scripts\python train/multi_model.py train --forms quad,wing --synth 5000 --tag m1
+venv\Scripts\python train/multi_model.py train --forms wing --synth 5000 --tag w1
+venv\Scripts\python train/multi_model.py train --forms quad,wing --synth 5000 --rot 180 --tag m1r
+```
+
+- 첫 줄은 몇 장으로 끝까지 도는지 보는 확인이다(학습 아님).
+- `m1` 이 같이 쓰기, `w1` 은 날개만 따로 학습한 것이다. 네 발만 따로는 이미 있는 `v2` 다. 같이 쓴 것이 따로 한 것보다 나은지 이 셋으로 견준다.
+- `m1r` 은 돌리기를 ±180도로 넓힌 것이다. `v2` 가 누운 사진에 약했다(아이 그림 53% → 세우면 89%).
+- 결과: 형태마다 `models/quad_<이름>.pth` · `models/wing_<이름>.pth`, 기록은 `out/multi_<이름>.json`. 4절에서 올릴 때 `models/wing_*.pth out/multi_*.json` 도 함께 더한다.
+- 날개형 확인 점수는 합성 그림으로 잰 것이라 실제 그림 점수가 아니다. 날개형 시험 세트는 아직 없다.
+
 ## 4. 결과를 노트북으로 보내기
 
 `*.pth` 와 `out/` 은 `.gitignore` 가 막고 있어 `-f` 로 더한다.
 
 ```powershell
 git checkout -b train/quad-v1
-git add -f models/quad_v*.pth out/quad_v*.json
+git add -f models/*.pth out/quad_*.json out/multi_*.json
 git commit -m "네 발 모델 v1 학습 결과"
 git push -u origin train/quad-v1
 ```
