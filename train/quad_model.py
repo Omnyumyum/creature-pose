@@ -15,6 +15,7 @@
     python train/quad_model.py train --synth 5000 --tag v2                      (에폭마다 합성 마스크 5,000장을 새로 만들어 섞는다. train/synth_quad.py)
     python train/quad_model.py train --synth 5000 --real 0 --tag v2s            (합성만)
     python train/quad_model.py train --arch r50 --init ap10k --tag v3           (AP-10K 동물 사진 가중치에서 시작. 견줄 것: --arch r50 --tag v3i 는 ImageNet 에서)
+    python train/quad_model.py train --synth 5000 --junk 0.35 --tag v4          (학습 그림의 35% 에 사진 마스크의 군더더기를 붙인다: 띠 · 이어진 덩어리 · 잘림)
     python train/quad_model.py train --dry                                      (몇 장만 넣어 끝까지 도는지 확인, 학습 아님)
 학습 정답은 trainset/quad_v1/ (tools/export_train.py 가 만든다). 학습은 집 PC(RTX 5080)에서, 시험은 시험 세트가 있는 노트북에서 한다. 설치는 train/INSTALL.md
 """
@@ -104,6 +105,56 @@ def apply(M: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return np.c_[pts, np.ones(len(pts))] @ M[:2].T
 
 
+def add_junk(m: np.ndarray, pts: np.ndarray, rng: random.Random) -> tuple[np.ndarray, np.ndarray]:
+    """사진에서 온 마스크의 군더더기 흉내 (2026-11-20). 시험 세트에서 크게 틀린 그림은 모델보다 마스크가 문제였다:
+    종이 가장자리 · 그림자 띠가 붙고, 올라탄 사람 같은 다른 덩어리가 이어지고, 몸 일부가 잘려 있었다. 합성 마스크에는 그런 것이 없었다.
+    군더더기를 붙이면 마스크를 감싼 칸이 달라지므로, 시험 때처럼 그 칸에 다시 맞춘다(관절 좌표도 함께)"""
+    m = m.astype(np.uint8)
+    ys, xs = np.nonzero(m)
+    if not len(xs):
+        return m > 0, pts
+    x0, x1, y0, y1 = int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())
+    for _ in range(rng.choice([1, 1, 2, 3])):
+        kind = rng.random()
+        if kind < 0.4:        # 띠: 바닥 그림자 · 종이 가장자리. 몸에 닿게, 들쭉날쭉하게
+            t = rng.randint(6, 34)
+            if rng.random() < 0.6:
+                y = rng.choice([y1 - rng.randint(0, 10), y0 - t + rng.randint(0, 10)])
+                a, b = sorted((rng.randint(0, IN - 1), rng.randint(0, IN - 1)))
+                if b - a < 80:
+                    a, b = 0, IN - 1
+                top = [(x, y + rng.randint(-4, 4)) for x in range(a, b, 16)]
+                cv2.fillPoly(m, [np.array(top + [(b, y + t), (a, y + t)], np.int32)], 1)
+            else:
+                x = rng.choice([x1 - rng.randint(0, 10), x0 - t + rng.randint(0, 10)])
+                side = [(x + rng.randint(-4, 4), y) for y in range(0, IN, 16)]
+                cv2.fillPoly(m, [np.array(side + [(x + t, IN - 1), (x + t, 0)], np.int32)], 1)
+        elif kind < 0.8:      # 덩어리: 몸에 이어진 다른 것 (올라탄 사람 · 옆에 그린 것)
+            k = rng.randrange(len(xs))
+            cx, cy = int(xs[k]) + rng.randint(-25, 25), int(ys[k]) - rng.randint(0, 70)
+            n = rng.randint(5, 9)
+            r = rng.randint(12, 40)
+            poly = [(cx + r * rng.uniform(0.5, 1.2) * math.cos(2 * math.pi * i / n), cy + r * rng.uniform(0.5, 1.4) * math.sin(2 * math.pi * i / n)) for i in range(n)]
+            cv2.fillPoly(m, [np.array(poly, np.int32)], 1)
+        else:                 # 잘림: 그림 한쪽이 사진 밖으로
+            cut = rng.uniform(0.08, 0.28)
+            if rng.random() < 0.5:
+                w = int((x1 - x0) * cut)
+                m[:, : x0 + w] = 0 if rng.random() < 0.5 else m[:, : x0 + w]
+                if rng.random() < 0.5:
+                    m[:, x1 - w:] = 0
+            else:
+                h = int((y1 - y0) * cut)
+                m[y1 - h:, :] = 0
+    if not m.any():
+        return m > 0, pts
+    M2 = base_matrix(m > 0)
+    return warp(m > 0, M2), apply(M2, pts)
+
+
+JUNK = arg("--junk", 0.0)        # 학습 그림 가운데 군더더기를 붙이는 비율 (0 = 붙이지 않음)
+
+
 def sample(mask: np.ndarray, joints: np.ndarray, weights: np.ndarray, rng: random.Random | None):  # noqa: ANN201
     """마스크 + 관절 → (입력, 히트맵, 가중치, 입력 칸 좌표). rng 를 주면 늘리기를 한다"""
     M = base_matrix(mask)
@@ -113,6 +164,8 @@ def sample(mask: np.ndarray, joints: np.ndarray, weights: np.ndarray, rng: rando
     if rng:
         m = roughen(m, rng)
     pts = apply(M, joints)
+    if rng and rng.random() < JUNK:
+        m, pts = add_junk(m, pts, rng)
     w = weights * ((pts >= 0) & (pts < IN)).all(axis=1)      # 칸 밖으로 나간 관절은 뺀다
     return (torch.from_numpy(m[None].astype(np.float32)), torch.from_numpy(heatmaps(pts)), torch.from_numpy(w.astype(np.float32)),
             torch.from_numpy(pts.astype(np.float32)))
@@ -225,11 +278,16 @@ def decode(hm: torch.Tensor) -> np.ndarray:
 
 
 def predict(net: Net, mask: np.ndarray) -> np.ndarray:
-    """마스크(원래 크기) → 관절 18개 (마스크 좌표)"""
+    """마스크(원래 크기) → 관절 18개 (마스크 좌표). 좌우로 뒤집어 한 번 더 보고 히트맵을 평균한다
+    (관절 이름이 왼 · 오른이 아니라 몸 안쪽 · 바깥쪽이라 뒤집어도 이름이 그대로다. 학습 없이 받은 그대로 약 4%p 올랐다, tools/analyze_quad.py).
+    끄려면 --no-flip"""
     M = base_matrix(mask)
     x = torch.from_numpy(warp(mask, M)[None, None].astype(np.float32)).to(DEV)
     with torch.no_grad():
-        pts = decode(net(x))[0]
+        hm = net(x)
+        if "--no-flip" not in sys.argv:
+            hm = (hm + torch.flip(net(torch.flip(x, dims=[3])), dims=[3])) / 2
+        pts = decode(hm)[0]
     return apply(np.linalg.inv(M), pts.astype(float))
 
 
@@ -301,7 +359,7 @@ def train() -> None:
         if acc >= best:
             best = acc
             torch.save(net.state_dict(), out / f"quad_{tag}.pth")
-    res = {"tag": tag, "arch": arch, "init": init, "lr": lr, "seed": seed, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
+    res = {"tag": tag, "arch": arch, "init": init, "lr": lr, "seed": seed, "junk": JUNK, "train": len(tr) if real else 0, "synth_per_epoch": synth, "val": len(val), "epochs": epochs, "best_val_pck10": round(best, 4), "log": log}
     if (ROOT / "data/testset/quadruped/labels.json").exists():
         res["test"] = test(tag)
     else:

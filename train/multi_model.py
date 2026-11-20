@@ -64,6 +64,8 @@ def sample(form: str, mask: np.ndarray, joints: np.ndarray, weights: np.ndarray,
     if rng:
         m = Q.roughen(m, rng)
     pts = Q.apply(M, joints)
+    if rng and rng.random() < Q.JUNK:                  # 사진 마스크의 군더더기 흉내 (--junk 비율)
+        m, pts = Q.add_junk(m, pts, rng)
     w = weights.astype(np.float32).copy()
     n = len(FORMS[form]["order"])
     if FORMS[form]["reduce"] and len(pts) != n:
