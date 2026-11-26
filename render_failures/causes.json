@@ -1,23 +1,134 @@
 {
   "note": "2026-11-26. collect.py 결과(out/results.json)의 모아 보기 그림(out/sheet_*.png)을 한 번 눈으로 보고 매긴 주된 원인. 한 그림에 원인 하나만 적었다. 작은 그림으로 본 한 사람의 판단이라 다시 보면 몇 장은 달라질 수 있다. 날개형 3쪽(sheet_winged_3)은 눈으로 보지 않고 수치만 썼다.",
   "quadruped": {
-    "attached": {"name": "다른 것이 함께 잡힘 (종이 가장자리 · 책상 · 그림자 띠 · 올라탄 사람 · 옆 그림)", "keys": ["qr_01", "qr_02", "qr_06", "qr_07", "qr_12", "qr_15", "kids_04"]},
-    "faint": {"name": "연한 선 · 그림자 사진이라 몸이 조각나거나 종이째 잡힘", "keys": ["qr_00", "qr_04", "qr_08", "qr_10", "qr_11", "real_pig"]},
-    "rotated": {"name": "누운(돌아간) 사진", "keys": ["kids_01", "kids_05", "qr_05"]},
-    "pose": {"name": "옆모습 네 발이 아닌 자세 (두 발로 섬 · 앞모습 · 앉음)", "keys": ["own_00", "kids_03", "qr_16", "animal_cat"]}
+    "attached": {
+      "name": "다른 것이 함께 잡힘 (종이 가장자리 · 책상 · 그림자 띠 · 올라탄 사람 · 옆 그림)",
+      "keys": [
+        "qr_01",
+        "qr_02",
+        "qr_06",
+        "qr_07",
+        "qr_12",
+        "qr_15",
+        "kids_04"
+      ]
+    },
+    "faint": {
+      "name": "연한 선 · 그림자 사진이라 몸이 조각나거나 종이째 잡힘",
+      "keys": [
+        "qr_00",
+        "qr_04",
+        "qr_08",
+        "qr_10",
+        "qr_11",
+        "real_pig"
+      ]
+    },
+    "rotated": {
+      "name": "누운(돌아간) 사진",
+      "keys": [
+        "kids_01",
+        "kids_05",
+        "qr_05"
+      ]
+    },
+    "pose": {
+      "name": "옆모습 네 발이 아닌 자세 (두 발로 섬 · 앞모습 · 앉음)",
+      "keys": [
+        "own_00",
+        "kids_03",
+        "qr_16",
+        "animal_cat"
+      ]
+    }
   },
   "winged": {
-    "template_topview": {"name": "양쪽으로 펼친 날개 (위 · 앞에서 본 나비 · 잠자리): 머리 · 몸통 칸을 못 찾음", "keys": ["own_02", "wings_butterfly", "crayon_wings", "dragonfly", "fairy", "lineart_butterfly"]},
-    "template_qd": {"name": "선으로만 그린 낙서: 머리 · 몸통 칸을 못 찾음", "count": 24, "by_kind": {"나비": "6/7", "벌": "5/7", "모기": "4/7", "부엉이": "3/7", "새": "2/7", "오리": "2/7", "앵무새": "2/7"}},
-    "blank": {"name": "성공이라고 답했지만 렌더 그림이 비어 있음 (기본 뼈대 30장 가운데)", "keys": ["qd_butterfly_5024869580275712", "qd_mosquito_4579781553160192", "qd_mosquito_5672902638698496", "qd_mosquito_6274541657522176", "qd_owl_5949556145520640"]},
-    "nowing": {"name": "관절은 찾았지만 날개를 못 찾아 날개 관절이 몸에 겹침", "count": 12, "still": ["qd_bird_5357674197680128", "qd_duck_4613438221320192", "qd_mosquito_5007320478121984", "qd_owl_5935441549197312", "qd_parrot_5927324258140160"]},
-    "detached": {"name": "몸에서 떨어진 날개 · 선이 끊긴 날개가 잘라내기에서 빠짐", "keys": ["fairy", "broken_bird"]}
+    "template_topview": {
+      "name": "양쪽으로 펼친 날개 (위 · 앞에서 본 나비 · 잠자리): 머리 · 몸통 칸을 못 찾음",
+      "keys": [
+        "own_02",
+        "wings_butterfly",
+        "crayon_wings",
+        "dragonfly",
+        "fairy",
+        "lineart_butterfly"
+      ]
+    },
+    "template_qd": {
+      "name": "선으로만 그린 낙서: 머리 · 몸통 칸을 못 찾음",
+      "count": 24,
+      "by_kind": {
+        "나비": "6/7",
+        "벌": "5/7",
+        "모기": "4/7",
+        "부엉이": "3/7",
+        "새": "2/7",
+        "오리": "2/7",
+        "앵무새": "2/7"
+      }
+    },
+    "blank": {
+      "name": "성공이라고 답했지만 렌더 그림이 비어 있음 (기본 뼈대 30장 가운데)",
+      "keys": [
+        "qd_butterfly_5024869580275712",
+        "qd_mosquito_4579781553160192",
+        "qd_mosquito_5672902638698496",
+        "qd_mosquito_6274541657522176",
+        "qd_owl_5949556145520640"
+      ]
+    },
+    "nowing": {
+      "name": "관절은 찾았지만 날개를 못 찾아 날개 관절이 몸에 겹침",
+      "count": 12,
+      "still": [
+        "qd_bird_5357674197680128",
+        "qd_duck_4613438221320192",
+        "qd_mosquito_5007320478121984",
+        "qd_owl_5935441549197312",
+        "qd_parrot_5927324258140160"
+      ]
+    },
+    "detached": {
+      "name": "몸에서 떨어진 날개 · 선이 끊긴 날개가 잘라내기에서 빠짐",
+      "keys": [
+        "fairy",
+        "broken_bird"
+      ]
+    }
   },
-  "radial": {"template": {"name": "가지(다리)를 못 찾음", "keys": ["monster_eyestalks", "monster_blob"]}},
+  "radial": {
+    "template": {
+      "name": "가지(다리)를 못 찾음",
+      "keys": [
+        "monster_eyestalks",
+        "monster_blob"
+      ]
+    }
+  },
   "figs": {
-    "blank": ["winged/qd_mosquito_5672902638698496", "winged/qd_butterfly_5024869580275712"],
-    "topview": ["winged/wings_butterfly", "winged/dragonfly"],
-    "pose": ["quadruped/own_00", "quadruped/animal_cat"],
-    "detached": ["winged/fairy", "winged/broken_bird"]
+    "blank": [
+      "winged/qd_mosquito_5672902638698496",
+      "winged/qd_butterfly_5024869580275712"
+    ],
+    "topview": [
+      "winged/wings_butterfly",
+      "winged/dragonfly"
+    ],
+    "pose": [
+      "quadruped/own_00",
+      "quadruped/animal_cat"
+    ],
+    "detached": [
+      "winged/fairy",
+      "winged/broken_bird"
+    ],
+    "radial": [
+      "radial/monster_eyestalks",
+      "radial/monster_blob"
+    ],
+    "chain": [
+      "chain/snake_s",
+      "chain/snake_coil"
+    ]
   }
 }
